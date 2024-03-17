@@ -80,7 +80,7 @@ class App(tk.Tk):
         self.user_name = self.username_entry.get()
         self.session = time.time()
         # create a new directory with username
-        self.create_user_directory(self.user_name)
+        self.create_user_directory(f"user_{self.user_name}")
         # change screen to another screen
         self.change_screen()
     
@@ -186,10 +186,10 @@ class App(tk.Tk):
         self.map["missed_keys"] = self.wrong
 
 
-        self.create_user_directory(f"{self.user_name}/{str(int(self.session))}")
+        self.create_user_directory(f"user_{self.user_name}/{str(int(self.session))}")
         # store the result as pandas dataframe
         df = pd.DataFrame(self.map)
-        df.to_csv(f"{self.user_name}/{str(int(self.session))}/{self.sentence_index}.csv", index=False)
+        df.to_csv(f"user_{self.user_name}/{str(int(self.session))}/{self.sentence_index}.csv", index=False)
 
     
     def key_released(self, event):
