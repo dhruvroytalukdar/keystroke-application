@@ -2,13 +2,11 @@ import tkinter as tk
 import time
 import os
 import pandas as pd
+import sys
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-
-        self.title("Keystroke Dynamics Application")
-        self.geometry("600x400")
 
         # User name
         self.user_name = None
@@ -23,10 +21,23 @@ class App(tk.Tk):
         self.release_index = 0
         self.wrong = 0
         self.curr_key = None
+        self.motivation_mode = None
+        self.motivation_quotes = [
+            ("",None,0),
+            ("It's okay. You are doing great!😊", "green", 5),
+            ("Arr ektu concentrate koro.🙂", "magenta" , 10),
+            ("Dekhe type kor bhai.😐", "blue", 14),
+            ("Andho naki bhai?🤨", "brown", 22),
+            ("Chaar bhai...English sikhe ai age ja.🤬", "red", 25)
+        ]
 
         # Read and store the sentences to be typed
         self.dataset = []
-        with open("sentences.txt", "r") as file:
+
+        self.title("Keystroke Dynamics Application")
+        self.geometry("600x400")
+
+        with open("dataset.txt", "r") as file:
             sentences = file.readlines()
             for sentence in sentences:
                 # print(sentence.strip())
@@ -41,8 +52,17 @@ class App(tk.Tk):
         self.typed_sentence = ""
 
 
-        title = tk.Label(self, text="Keystroke Dynamics Application", font=("Helvetica", 24))
+        title = tk.Label(self, text="Keystroke Dynamics Application", font=("Helvetica", 24, "bold"))
         title.pack(pady=10)
+
+        # create a checkbutton to enable motivation mode
+        self.motivation_mode = tk.IntVar()
+        self.motivation_mode.set(0)
+        self.motivation_checkbox = tk.Checkbutton(self, text="Motivation Mode", variable=self.motivation_mode, command=self.set_motivation_label,font=("Helvetica", 18))
+        self.motivation_checkbox.pack(pady=10)
+        self.quote_index = 0
+        self.motivation_label = tk.Label(self, text=self.motivation_quotes[self.quote_index][0], foreground=self.motivation_quotes[self.quote_index][1],font=("Helvetica", 18))
+        self.motivation_label.pack(pady=10)
 
         # Enter username prompt
         self.label = tk.Label(self, text="Enter your username:", font=("Helvetica", 18))
@@ -68,6 +88,21 @@ class App(tk.Tk):
 
         self.press_map = {}
         self.release_map = {}
+        self.data_folder = "user_data"
+
+    def set_motivation_label(self):
+        if self.motivation_mode.get() == 1:
+            for i in range(len(self.motivation_quotes)):
+                quote = self.motivation_quotes[i]
+                if self.wrong <= quote[2]:
+                    # self.motivation_label = tk.Label(self, text=quote[0], font=("Helvetica", 18), foreground=quote[1])
+                    # self.motivation_label.pack(pady=10)
+                    self.quote_index = i
+                    break
+        else:
+            self.quote_index = 0
+        
+        self.motivation_label.config(text=self.motivation_quotes[self.quote_index][0], foreground=self.motivation_quotes[self.quote_index][1])
 
     def create_user_directory(self, directory_name):
         if not os.path.exists(directory_name):
@@ -79,7 +114,7 @@ class App(tk.Tk):
         self.user_name = self.username_entry.get()
         self.session = time.time()
         # create a new directory with username
-        self.create_user_directory(f"user_{self.user_name}")
+        self.create_user_directory(f"{self.data_folder}/user_{self.user_name}")
         # change screen to another screen
         self.change_screen()
     
@@ -147,9 +182,11 @@ class App(tk.Tk):
     def get_rand_bit_string(self):
         scale = 1_000_000_000_000
         bits_range = 2**32
-        path = f"user_{self.user_name}/{str(int(self.session))}"
+        path = f"{self.data_folder}/user_{self.user_name}/{str(int(self.session))}"
         write_result = []
-        for i in range(1, 6):
+        for i in range(1, len(self.dataset)+1):
+            if not os.path.exists(f"{path}/{i}.csv"):
+                continue
             keystroke_data = pd.read_csv(f"{path}/{i}.csv")
             result = None
             for i in range(len(keystroke_data)):
@@ -182,6 +219,9 @@ class App(tk.Tk):
                 display_text += self.typed_sentence[i]
         self.typing_label.config(text=display_text)
 
+        self.set_motivation_label()
+
+
     def key_pressed(self, event):
         if event.keysym != "BackSpace":
             if event.char == self.dataset[self.sentence_index][self.press_index]:
@@ -193,7 +233,9 @@ class App(tk.Tk):
                 # print(event.keysym, "pressed")
             else:
                 self.wrong += 1
-                # print("Wrong key pressed", self.wrong)
+        
+        # print("Press ",self.press_map.keys())
+        # print("Wrong key pressed", self.wrong)
         self.update_typed_sentence()
     
     def key_released(self, event):
@@ -209,6 +251,7 @@ class App(tk.Tk):
 
             if self.typed_sentence == self.dataset[self.sentence_index]:
                 self.next_button.config(state="normal")
+        # print("Release ", self.release_index, event.keysym ,self.release_map.keys())
 
     def abs_func(self, x):
         if x < 0:
@@ -219,6 +262,9 @@ class App(tk.Tk):
         RELEASE = 1
         PRESS = 1
         CHAR = 0
+
+        if len(self.press_map) != len(self.release_map):
+            return
 
         for i in range(len(self.press_map)-1):
             self.map["key_pressed"].append(self.press_map[i][CHAR])
@@ -239,11 +285,23 @@ class App(tk.Tk):
         self.map["missed_keys"] = self.wrong
 
 
-        self.create_user_directory(f"user_{self.user_name}/{str(int(self.session))}")
+        self.create_user_directory(f"{self.data_folder}/user_{self.user_name}/{str(int(self.session))}")
         df = pd.DataFrame(self.map)
-        df.to_csv(f"user_{self.user_name}/{str(int(self.session))}/{self.sentence_index}.csv", index=False)
+        df.to_csv(f"{self.data_folder}/user_{self.user_name}/{str(int(self.session))}/{self.sentence_index}.csv", index=False)
 
+
+def popupError(s):
+    popupRoot = tk.Tk()
+    # popupRoot.after(10000, exit)
+    popupButton = tk.Button(popupRoot, text = s, font = ("Verdana", 12), bg = "yellow", command=sys.exit)
+    popupButton.pack()
+    popupRoot.geometry('400x50+700+500')
+    popupRoot.mainloop()
 
 if __name__ == "__main__":
-    app = App()
-    app.mainloop()
+    # check if the file is present
+    if not os.path.exists("dataset.txt"):
+        popupError("'dataset.txt' file not found")
+    else:
+        app = App()
+        app.mainloop()
