@@ -19,9 +19,8 @@ class App(tk.Tk):
 
         self.press_time = None
         self.release_time = None
-        self.prev_press_time = None
-        self.prev_release_time = None
-        self.index = 0
+        self.press_index = 0
+        self.release_index = 0
         self.wrong = 0
         self.curr_key = None
 
@@ -30,7 +29,7 @@ class App(tk.Tk):
         with open("sentences.txt", "r") as file:
             sentences = file.readlines()
             for sentence in sentences:
-                print(sentence.strip())
+                # print(sentence.strip())
                 if sentence.strip()[-1] == "\n":
                     self.dataset.append(sentence.strip()[:-1])
                 else:
@@ -67,8 +66,8 @@ class App(tk.Tk):
             "missed_keys": 0,
         }
 
-        self.typing_map = []
-
+        self.press_map = {}
+        self.release_map = {}
 
     def create_user_directory(self, directory_name):
         if not os.path.exists(directory_name):
@@ -115,9 +114,10 @@ class App(tk.Tk):
     
     def next_sentence(self):
         self.sentence_index += 1
+        self.store_typed_results()
         if self.sentence_index < len(self.dataset):
-            self.store_typed_results()
-            self.typing_map = []
+            self.press_map = {}
+            self.release_map = {}
             self.map = {
                 "key_pressed": [],
                 "hold_latency": [],
@@ -130,93 +130,119 @@ class App(tk.Tk):
             self.typed_sentence = ""
             self.next_button.pack_forget()
             self.change_text()
+            self.order_sequence = list(self.dataset[self.sentence_index])
             self.update_typed_sentence()
             self.start_button.pack(pady=10)
-            self.index = 0
+            self.press_index = 0
+            self.release_index = 0
             self.press_time = None
             self.release_time = None
             self.wrong = 0
             self.unbind("<Key>")
             self.unbind("<KeyRelease>")
         else:
-            self.store_typed_results()
+            self.get_rand_bit_string()
             self.destroy()
+
+    def get_rand_bit_string(self):
+        scale = 1_000_000_000_000
+        bits_range = 2**32
+        path = f"user_{self.user_name}/{str(int(self.session))}"
+        write_result = []
+        for i in range(1, 6):
+            keystroke_data = pd.read_csv(f"{path}/{i}.csv")
+            result = None
+            for i in range(len(keystroke_data)):
+                first_row = keystroke_data.iloc[i]
+                press_latency = str(format(int(first_row['press_latency'] * scale)%bits_range, '032b'))
+                hold_latency = str(format(int(first_row['hold_latency'] * scale)%bits_range, '032b'))
+                inter_key_latency = str(format(int(first_row['inter_key_latency'] * scale)%bits_range, '032b'))
+                release_latency = str(format(int(first_row['release_latency'] * scale)%bits_range, '032b'))
+                final_bit_string = press_latency + hold_latency + inter_key_latency + release_latency
+                if result is None:
+                    result = final_bit_string
+                else:
+                    # xor the bit strings
+                    result = ''.join('1' if a != b else '0' for a, b in zip(result, final_bit_string))
+            write_result.append(result)
+        with open(f"{path}/bit_strings.txt", 'w') as f:
+            for item in write_result:
+                f.write("%s\n" % item)
 
     def change_text(self):
         self.sentence_label.config(text=self.dataset[self.sentence_index])
 
     def update_typed_sentence(self):
         # change the color of the part of label that has been typed correctly
-        self.typing_label.config(text=self.typed_sentence)
+        display_text = ""
+        for i in range(len(self.typed_sentence)):
+            if self.typed_sentence[i] == " ":
+                display_text += "-"
+            else:
+                display_text += self.typed_sentence[i]
+        self.typing_label.config(text=display_text)
 
     def key_pressed(self, event):
         if event.keysym != "BackSpace":
-            if self.curr_key == event.keysym:
-                return
-            print("current ",event.keysym, self.curr_key)
-            if event.char == self.dataset[self.sentence_index][self.index]:
-                if self.curr_key == None:
-                    self.curr_key = event.keysym
-                    self.press_time = time.time()
-                print(event.keysym, "pressed")
+            if event.char == self.dataset[self.sentence_index][self.press_index]:
+                self.press_index += 1
+                self.press_time = time.time()
+                self.press_map[self.press_index-1] = (event.keysym, self.press_time)
+                self.curr_key = event.keysym
+                self.typed_sentence += event.char
+                # print(event.keysym, "pressed")
             else:
                 self.wrong += 1
-                print("Wrong key pressed", self.wrong)
+                # print("Wrong key pressed", self.wrong)
+        self.update_typed_sentence()
+    
+    def key_released(self, event):
+        if event.keysym.isalpha():
+            # somehow determine the key released is correct or not
+            if self.release_index < self.press_index and event.keysym == self.press_map[self.release_index][0]:
+                self.release_index += 1
+                self.release_time = time.time()
+                self.release_map[self.release_index-1] = (event.keysym, self.release_time)
+                self.curr_key = None
+                # print(event.keysym, "released")
+                # print("Latency: ", self.release_time - self.press_time)
+
+            if self.typed_sentence == self.dataset[self.sentence_index]:
+                self.next_button.config(state="normal")
+
+    def abs_func(self, x):
+        if x < 0:
+            return -1*x
+        return x
 
     def store_typed_results(self):
-        RELEASE = 2
+        RELEASE = 1
         PRESS = 1
         CHAR = 0
-        for i in range(len(self.typing_map)-1):
-            self.map["key_pressed"].append(self.typing_map[i][CHAR])
-            self.map["hold_latency"].append(self.typing_map[i][RELEASE] - self.typing_map[i][PRESS])
-            self.map["inter_key_latency"].append(self.typing_map[i+1][PRESS] - self.typing_map[i][RELEASE])
-            self.map["press_latency"].append(self.typing_map[i+1][PRESS] - self.typing_map[i][PRESS])
-            self.map["release_latency"].append(self.typing_map[i+1][RELEASE] - self.typing_map[i][RELEASE])
-            self.map["timestamp"].append(self.typing_map[i][PRESS])
+
+        for i in range(len(self.press_map)-1):
+            self.map["key_pressed"].append(self.press_map[i][CHAR])
+            self.map["hold_latency"].append(self.abs_func(self.release_map[i][RELEASE] - self.press_map[i][PRESS]))
+            self.map["inter_key_latency"].append(self.abs_func(self.press_map[i+1][PRESS] - self.release_map[i][RELEASE]))
+            self.map["press_latency"].append(self.abs_func(self.press_map[i+1][PRESS] - self.press_map[i][PRESS]))
+            self.map["release_latency"].append(self.abs_func(self.release_map[i+1][RELEASE] - self.release_map[i][RELEASE]))
+            self.map["timestamp"].append(self.abs_func(self.press_map[i][PRESS]))
             self.map["missed_keys"] = self.wrong
 
-        i = len(self.typing_map)-1
-        self.map["key_pressed"].append(self.typing_map[i][CHAR])
-        self.map["hold_latency"].append(self.typing_map[i][RELEASE] - self.typing_map[i][PRESS])
+        i = len(self.press_map)-1
+        self.map["key_pressed"].append(self.press_map[i][CHAR])
+        self.map["hold_latency"].append(self.abs_func(self.release_map[i][RELEASE] - self.press_map[i][PRESS]))
         self.map["press_latency"].append(0)
         self.map["inter_key_latency"].append(0)
         self.map["release_latency"].append(0)
-        self.map["timestamp"].append(self.typing_map[i][PRESS])
+        self.map["timestamp"].append(self.abs_func(self.press_map[i][PRESS]))
         self.map["missed_keys"] = self.wrong
 
 
         self.create_user_directory(f"user_{self.user_name}/{str(int(self.session))}")
-        # store the result as pandas dataframe
         df = pd.DataFrame(self.map)
         df.to_csv(f"user_{self.user_name}/{str(int(self.session))}/{self.sentence_index}.csv", index=False)
 
-    
-    def key_released(self, event):
-        # if the character is a to z or A to Z
-        if event.keysym.isalpha():
-            # if there is a backspace
-            if event.keysym == "BackSpace":
-                # return
-                self.index -= 1
-                self.typed_sentence = self.typed_sentence[:-1]
-                if self.typed_sentence != self.dataset[self.sentence_index]:
-                    self.next_button.config(state="disabled")
-            else:
-                if self.curr_key == None:
-                    return
-                self.index += 1
-                self.typed_sentence += event.char
-                if event.char == self.dataset[self.sentence_index][self.index-1]:
-                    self.release_time = time.time()
-                    self.curr_key = None
-                    self.typing_map.append((event.keysym, self.press_time, self.release_time))
-                    print(event.keysym, "released")
-                    print("Latency: ", self.release_time - self.press_time)
-                if self.typed_sentence == self.dataset[self.sentence_index]:
-                    self.next_button.config(state="normal")
-        
-        self.update_typed_sentence()
 
 if __name__ == "__main__":
     app = App()
